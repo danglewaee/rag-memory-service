@@ -1,57 +1,65 @@
-# AI-AnomalyGuard
+# RAG Memory Service (MongoDB + Redis)
 
-AI-powered anomaly detection platform for water monitoring, upgraded to a production-style multi-tech stack.
+This branch adds a memory retrieval module on top of the existing FastAPI backend.
 
-## Upgraded Stack
+## Scope
 
-- API: FastAPI + WebSockets
-- Storage: PostgreSQL (TimescaleDB extension attempt) via SQLAlchemy
-- Async jobs: Celery + Redis
-- Streaming integration: Kafka publisher for alerts
-- ML: Isolation Forest + SHAP-ready explainability
-- ML ops: MLflow metric logging
-- Monitoring: Prometheus + Grafana
-- Auth: JWT (OAuth2 password flow) + admin RBAC
-- Infra: Docker Compose + Terraform scaffold
-- CI: GitHub Actions (backend compile + frontend build)
+Compared to branch `codex/vn-real-data-mvp`, only these files changed:
 
-## Project Structure
+- `README.md`
+- `backend/.env.example`
+- `backend/app/config.py`
+- `backend/app/main.py`
+- `backend/app/services/metrics.py`
+- `backend/requirements.txt`
+- `docker-compose.yml`
+- `backend/app/schemas_memory.py` (new)
+- `backend/app/services/memory_store.py` (new)
 
-- `backend/app/main.py`: API, RBAC, ingest orchestration, metrics endpoint
-- `backend/app/services/store_pg.py`: PostgreSQL data layer
-- `backend/app/services/detector.py`: hybrid anomaly scoring with SHAP fallback
-- `backend/app/tasks.py`: Celery ingestion tasks
-- `docker-compose.yml`: full local platform stack
-- `observability/prometheus/prometheus.yml`: Prometheus scrape config
-- `infra/terraform/main.tf`: Terraform scaffold
-- `.github/workflows/ci.yml`: CI pipeline
+Everything else is unchanged from the previous project baseline.
 
-## Run Full Stack (Docker)
+## What Was Added
+
+- MongoDB-backed memory storage for chat/session context
+- Redis caching for repeated memory search queries
+- Ranking by keyword overlap + optional embedding cosine similarity + recency bonus
+- New API endpoints:
+  - `POST /api/memory/upsert`
+  - `POST /api/memory/search`
+  - `DELETE /api/memory/{memory_id}`
+  - `GET /api/memory/stats`
+
+## Tech
+
+- API: FastAPI
+- Memory Store: MongoDB
+- Cache: Redis
+- Existing stack retained: PostgreSQL, Celery, Kafka, Prometheus, Grafana
+
+## Quick Start (Docker)
 
 ```powershell
 docker compose up --build
 ```
 
 Services:
+
 - API: `http://localhost:8000`
-- Frontend: `http://localhost:5173`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (`admin/admin`)
+- MongoDB: `localhost:27017`
+- Redis: `localhost:6379`
 
-## Local Backend (without Docker)
+## Environment
 
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload --port 8000
-```
+Memory-specific variables in `backend/.env.example`:
+
+- `MEMORY_CACHE_TTL_SECONDS=300`
+- `MONGODB_URL=mongodb://mongo:27017`
+- `MONGODB_DATABASE=anomalyguard`
+- `MONGODB_MEMORY_COLLECTION=rag_memory`
 
 ## Authentication
 
-Request admin token:
+Get token:
 
 ```powershell
 curl -X POST "http://localhost:8000/api/auth/token" \
@@ -59,43 +67,53 @@ curl -X POST "http://localhost:8000/api/auth/token" \
   -d "username=admin&password=admin123"
 ```
 
-Use returned bearer token for protected endpoints (`/api/ingest/*`, `/api/stream/start`, `/api/stream/stop`).
+Use bearer token for memory endpoints.
 
-## Ingest Real Data
+## API Examples
 
-Vietnam feed (Open-Meteo at VN coordinates):
+Upsert memory:
 
 ```powershell
-curl -X POST "http://localhost:8000/api/ingest/vn?station_id=mekong-can-tho&days=30" \
+curl -X POST "http://localhost:8000/api/memory/upsert" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "admin",
+    "session_id": "session-1",
+    "text": "User prefers anomaly alerts every morning",
+    "tags": ["preference", "alerts"],
+    "metadata": {"source": "chat"}
+  }'
+```
+
+Search memory:
+
+```powershell
+curl -X POST "http://localhost:8000/api/memory/search" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "admin",
+    "session_id": "session-1",
+    "query": "alert schedule preference",
+    "top_k": 5
+  }'
+```
+
+Memory stats:
+
+```powershell
+curl -X GET "http://localhost:8000/api/memory/stats" \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
-USGS feed:
+## Metrics
 
-```powershell
-curl -X POST "http://localhost:8000/api/ingest/usgs?site_no=01646500&hours=24" \
-  -H "Authorization: Bearer <TOKEN>"
-```
+Prometheus endpoint: `GET /metrics`
 
-## Observability
+Memory metrics:
 
-- Prometheus metrics endpoint: `GET /metrics`
-- Alert/readings counters and ingest latency are exported
-
-## Notes
-
-- VN ingest uses real hydro/weather feed; quality variables include derived proxies for compatibility with the anomaly pipeline.
-- Kafka publishing is controlled via `ENABLE_KAFKA_PUBLISH` in env.
-
-## RAG Memory Service (MongoDB + Redis Cache)
-
-New endpoints to support long-term chat memory retrieval:
-
-- `POST /api/memory/upsert` stores or updates a memory record (`text`, `tags`, `metadata`, optional `embedding`).
-- `POST /api/memory/search` returns top-k ranked memories using keyword score + optional embedding cosine similarity + recency bonus.
-- `DELETE /api/memory/{memory_id}` deletes one memory entry for the authenticated user.
-- `GET /api/memory/stats` returns memory/user/session counts.
-
-Auth note:
-- These endpoints require a bearer token from `/api/auth/token`.
-- `user_id` in payload must match the token subject (default: `admin`).
+- `anomalyguard_memory_upsert_total`
+- `anomalyguard_memory_delete_total`
+- `anomalyguard_memory_search_total{cache="hit|miss"}`
+- `anomalyguard_memory_search_duration_seconds`
