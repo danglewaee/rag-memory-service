@@ -1,23 +1,14 @@
 # Python
 __pycache__/
-*.py[cod]
-.venv/
-
-# Node
-node_modules/
-dist/
+*.pyc
 
 # Environment
 .env
 backend/.env
 
-# MLflow
-mlruns/
-
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
+# Local runtime
+*.log
+.venv/
 
 # OS
 .DS_Store

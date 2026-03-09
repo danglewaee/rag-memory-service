@@ -50,15 +50,3 @@ class MemorySearchResponse(BaseModel):
     from_cache: bool
     total_candidates: int
     results: list[MemorySearchResult]
-
-
-class MemoryDeleteResponse(BaseModel):
-    deleted: bool
-    memory_id: str
-
-
-class MemoryStatsResponse(BaseModel):
-    total_memories: int
-    total_users: int
-    total_sessions: int
-    cache_ttl_seconds: int

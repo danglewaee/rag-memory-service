@@ -16,7 +16,7 @@ from app.services.metrics import MEMORY_DELETED, MEMORY_SEARCH_DURATION, MEMORY_
 
 class MemoryStore:
     def __init__(self) -> None:
-        self.mongo = MongoClient(settings.mongodb_url)
+        self.mongo = MongoClient(settings.mongodb_url, serverSelectionTimeoutMS=3000)
         self.collection = self.mongo[settings.mongodb_database][settings.mongodb_memory_collection]
         self.redis = redis.Redis.from_url(settings.redis_url, decode_responses=True)
         self.cache_ttl_seconds = settings.memory_cache_ttl_seconds
@@ -25,6 +25,20 @@ class MemoryStore:
         self.collection.create_index([("memory_id", ASCENDING)], unique=True)
         self.collection.create_index([("user_id", ASCENDING), ("session_id", ASCENDING), ("updated_at", ASCENDING)])
         self.collection.create_index([("tags", ASCENDING)])
+
+    def ping(self) -> dict[str, bool]:
+        mongo_ok = False
+        redis_ok = False
+        try:
+            self.mongo.admin.command("ping")
+            mongo_ok = True
+        except Exception:
+            mongo_ok = False
+        try:
+            redis_ok = bool(self.redis.ping())
+        except Exception:
+            redis_ok = False
+        return {"mongo": mongo_ok, "redis": redis_ok}
 
     @staticmethod
     def _utc_now() -> datetime:
@@ -73,7 +87,7 @@ class MemoryStore:
 
     def _invalidate_user_cache(self, user_id: str) -> None:
         pattern = f"rag:search:{user_id}:*"
-        keys = list(self.redis.scan_iter(match=pattern, count=200))
+        keys = list(self.redis.scan_iter(match=pattern, count=300))
         if keys:
             self.redis.delete(*keys)
 
